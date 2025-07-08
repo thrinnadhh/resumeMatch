@@ -47,7 +47,7 @@ class ApiService {
       return response.json();
     } catch (error) {
       console.warn('API request failed, falling back to mock data:', error);
-      throw error;
+      return null;
     }
   }
 
@@ -397,9 +397,39 @@ class ApiService {
     const matchingConfig = config || this.getMatchingConfig();
     
     try {
-      return this.fetchWithAuth('/api/matching/enhanced', {
+      const result = await this.fetchWithAuth('/api/matching/enhanced', {
         method: 'POST',
         body: JSON.stringify({ resumeIds, jobIds, config: matchingConfig }),
+      });
+      
+      if (result) {
+        return result;
+      }
+      
+      // If API call failed (result is null), fall back to mock data
+      console.warn('Enhanced matching failed, using mock results with configuration');
+      
+      // Get stored resumes and jobs
+      const resumes = this.storage.get('resumes') || [];
+      const jobs = this.storage.get('jobDescriptions') || [];
+      
+      return resumeIds.flatMap(resumeId => {
+        const resume = resumes.find((r: Resume) => r.id === resumeId);
+        return jobIds.map(jobId => {
+          const job = jobs.find((j: JobDescription) => j.id === jobId);
+          const score = this.calculateMatchScore(resume, job, matchingConfig);
+          
+          return {
+            candidateId: resumeId,
+            jobId,
+            candidate: resume?.extractedData || this.getDefaultCandidateData(),
+            job: job || this.getDefaultJobDescription(),
+            matchingScore: score,
+            skillMatches: this.generateSkillMatches(resume, job),
+            strengths: this.generateStrengths(resume, job),
+            gaps: this.generateGaps(resume, job)
+          };
+        });
       });
     } catch (error) {
       console.warn('Enhanced matching failed, using mock results with configuration');
