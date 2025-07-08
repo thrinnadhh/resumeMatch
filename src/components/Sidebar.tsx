@@ -55,7 +55,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       icon: FileText,
       badge: resumeCount,
       children: [
-        { id: 'upload-resume', title: 'Upload Resume', icon: Plus },
+        { id: 'upload-resume', title: 'Upload Files', icon: Plus },
         { id: 'view-resume-details', title: 'View Resume Details', icon: Eye },
         { id: 'resume-history', title: 'Resume History (Last 10)', icon: History }
       ]

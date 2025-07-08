@@ -140,17 +140,8 @@ function App() {
       setMatchResults(results);
       setActiveSection('results');
       
-      // Add to history
-      const historyItem: MatchingHistory = {
-        id: Date.now().toString(),
-        date: new Date().toISOString().split('T')[0],
-        time: new Date().toTimeString().split(' ')[0],
-        jobDescriptions: jobDescriptions.map(j => j.title),
-        resumeCount: resumes.length,
-        results,
-        csvFileName: `matching_results_${Date.now()}.csv`,
-      };
-      setMatchingHistory(prev => [historyItem, ...prev]);
+      // Reload history after matching
+      await loadHistory();
     } catch (error) {
       console.error('Error during matching:', error);
     } finally {

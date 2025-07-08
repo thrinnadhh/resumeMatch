@@ -29,24 +29,41 @@ class ApiService {
     }
   };
 
-  private async fetchWithAuth(url: string, options: RequestInit = {}) {
+  private async callGeminiAPI(prompt: string): Promise<any> {
+    if (!GEMINI_API_KEY) {
+      console.warn('Gemini API key not found, using mock analysis');
+      return null;
+    }
+
     try {
-      const response = await fetch(`${API_BASE_URL}${url}`, {
-        ...options,
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${GEMINI_API_KEY}`,
-          ...options.headers,
         },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 2048,
+          }
+        })
       });
 
       if (!response.ok) {
-        throw new Error(`API Error: ${response.statusText}`);
+        throw new Error(`Gemini API error: ${response.statusText}`);
       }
 
-      return response.json();
+      const data = await response.json();
+      return data.candidates?.[0]?.content?.parts?.[0]?.text;
     } catch (error) {
-      console.warn('API request failed, falling back to mock data:', error);
+      console.warn('Gemini API call failed:', error);
       return null;
     }
   }
@@ -72,9 +89,9 @@ class ApiService {
       console.warn('Resume upload failed, using mock data');
       // Return mock resume data based on uploaded files
       const newResumes = Array.from(files).map((file, index) => ({
-        id: `mock-resume-${index}`,
+        id: `resume-${Date.now()}-${index}`,
         fileName: file.name,
-        uploadDate: new Date().toISOString(),
+        uploadDate: new Date().toISOString().split('T')[0],
         status: 'completed' as const,
         extractedData: {
           name: `Candidate ${index + 1}`,
@@ -83,14 +100,16 @@ class ApiService {
           address: `${123 + index} Main St, City, State`,
           skills: [
             { name: 'JavaScript', level: 'advanced' as const, isProjectUsed: true, weightage: 0.9 },
-            { name: 'React', level: 'intermediate' as const, isProjectUsed: true, weightage: 0.8 }
+            { name: 'React', level: 'intermediate' as const, isProjectUsed: true, weightage: 0.8 },
+            { name: 'Python', level: 'beginner' as const, isProjectUsed: false, weightage: 0.6 },
+            { name: 'Node.js', level: 'intermediate' as const, isProjectUsed: true, weightage: 0.7 }
           ],
           experience: [{
             company: `Company ${index + 1}`,
-            position: 'Developer',
+            position: 'Software Developer',
             duration: '2020-2023',
-            description: 'Software development',
-            technologies: ['JavaScript', 'React']
+            description: 'Software development and maintenance',
+            technologies: ['JavaScript', 'React', 'Node.js']
           }],
           education: [{
             degree: 'Bachelor of Computer Science',
@@ -102,7 +121,8 @@ class ApiService {
       
       // Save to localStorage
       const existingResumes = this.storage.get('resumes') || [];
-      this.storage.set('resumes', [...existingResumes, ...newResumes]);
+      const updatedResumes = [...existingResumes, ...newResumes];
+      this.storage.set('resumes', updatedResumes);
       
       return newResumes;
     }
@@ -129,19 +149,20 @@ class ApiService {
       console.warn('Job description upload failed, using mock data');
       // Return mock job descriptions based on uploaded files
       const newJobs = Array.from(files).map((file, index) => ({
-        id: `mock-job-${index}`,
+        id: `job-${Date.now()}-${index}`,
         title: `Job Position ${index + 1}`,
         company: `Company ${index + 1}`,
         description: 'Job description content...',
         requirements: ['JavaScript', 'React', 'TypeScript'],
         preferredSkills: ['Node.js', 'GraphQL'],
-        uploadDate: new Date().toISOString(),
+        uploadDate: new Date().toISOString().split('T')[0],
         fileName: file.name
       }));
       
       // Save to localStorage
       const existingJobs = this.storage.get('jobDescriptions') || [];
-      this.storage.set('jobDescriptions', [...existingJobs, ...newJobs]);
+      const updatedJobs = [...existingJobs, ...newJobs];
+      this.storage.set('jobDescriptions', updatedJobs);
       
       return newJobs;
     }
@@ -149,79 +170,51 @@ class ApiService {
 
   async createJobDescription(jobData: Partial<JobDescription>): Promise<JobDescription> {
     try {
-      return this.fetchWithAuth('/api/jobs', {
+      const response = await fetch(`${API_BASE_URL}/api/jobs`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(jobData),
       });
+
+      if (!response.ok) {
+        throw new Error('Failed to create job description');
+      }
+
+      return response.json();
     } catch (error) {
       console.warn('Create job description failed, using mock data');
       const newJob = {
-        id: `mock-job-${Date.now()}`,
+        id: `job-${Date.now()}`,
         title: jobData.title || 'New Job Position',
         company: jobData.company || 'Company Name',
         description: jobData.description || 'Job description...',
         requirements: jobData.requirements || [],
         preferredSkills: jobData.preferredSkills || [],
-        uploadDate: new Date().toISOString(),
+        uploadDate: new Date().toISOString().split('T')[0],
         fileName: 'manual-entry.txt'
       };
       
       // Save to localStorage
       const existingJobs = this.storage.get('jobDescriptions') || [];
-      this.storage.set('jobDescriptions', [...existingJobs, newJob]);
+      const updatedJobs = [...existingJobs, newJob];
+      this.storage.set('jobDescriptions', updatedJobs);
       
       return newJob;
     }
   }
 
-  async matchResumesWithJobs(resumeIds: string[], jobIds: string[]): Promise<MatchResult[]> {
-    try {
-      return this.fetchWithAuth('/api/matching/process', {
-        method: 'POST',
-        body: JSON.stringify({ resumeIds, jobIds }),
-      });
-    } catch (error) {
-      console.warn('Matching failed, using mock results');
-      // Return mock matching results
-      return resumeIds.flatMap(resumeId => 
-        jobIds.map(jobId => ({
-          id: `match-${resumeId}-${jobId}`,
-          resumeId,
-          jobId,
-          matchScore: Math.floor(Math.random() * 40) + 60, // 60-100%
-          strengths: ['Strong technical skills', 'Relevant experience'],
-          weaknesses: ['Could improve in specific areas'],
-          recommendations: ['Consider for interview'],
-          timestamp: new Date().toISOString()
-        }))
-      );
-    }
-  }
-
   async getMatchingHistory(): Promise<any[]> {
     try {
-      return this.fetchWithAuth('/api/matching/history');
+      const response = await fetch(`${API_BASE_URL}/api/matching/history`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch history');
+      }
+      return response.json();
     } catch (error) {
-      console.warn('History fetch failed, using mock data');
-      // Return mock history data
-      return [
-        {
-          id: 'history-1',
-          timestamp: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
-          resumeCount: 5,
-          jobCount: 2,
-          matchCount: 10,
-          averageScore: 78
-        },
-        {
-          id: 'history-2',
-          timestamp: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
-          resumeCount: 3,
-          jobCount: 1,
-          matchCount: 3,
-          averageScore: 85
-        }
-      ];
+      console.warn('History fetch failed, using stored data');
+      return this.storage.get('matchingHistory') || [];
     }
   }
 
@@ -244,9 +237,9 @@ class ApiService {
       console.warn('Export failed, generating mock file');
       // Generate a simple CSV as fallback
       const csvContent = [
-        'Resume,Job,Score,Strengths,Weaknesses',
+        'Candidate Name,Job Title,Company,Match Score,Strengths,Gaps',
         ...matchResults.map(result => 
-          `${result.resumeId},${result.jobId},${result.matchScore},"${result.strengths.join('; ')}","${result.weaknesses.join('; ')}"`
+          `"${result.candidate.name}","${result.job.title}","${result.job.company}",${result.matchingScore},"${result.strengths.join('; ')}","${result.gaps.join('; ')}"`
         )
       ].join('\n');
       
@@ -257,74 +250,100 @@ class ApiService {
   // Enhanced CRUD operations
   async deleteJobDescription(jobId: string): Promise<void> {
     try {
-      await this.fetchWithAuth(`/api/jobs/${jobId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}`, {
         method: 'DELETE',
       });
+      if (!response.ok) {
+        throw new Error('Failed to delete job description');
+      }
     } catch (error) {
       console.warn('Delete job description failed, using local storage');
-      const jobs = this.storage.get('jobDescriptions') || [];
-      const updatedJobs = jobs.filter((job: JobDescription) => job.id !== jobId);
-      this.storage.set('jobDescriptions', updatedJobs);
-      
-      // Add to history
-      this.addJobDescriptionHistory(jobId, 'deleted', 'Job description deleted');
     }
+    
+    // Always update local storage
+    const jobs = this.storage.get('jobDescriptions') || [];
+    const updatedJobs = jobs.filter((job: JobDescription) => job.id !== jobId);
+    this.storage.set('jobDescriptions', updatedJobs);
+    
+    // Add to history
+    this.addJobDescriptionHistory(jobId, 'deleted', 'Job description deleted');
   }
 
   async updateJobDescription(jobId: string, jobData: Partial<JobDescription>): Promise<JobDescription> {
     try {
-      return this.fetchWithAuth(`/api/jobs/${jobId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}`, {
         method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(jobData),
       });
+      if (!response.ok) {
+        throw new Error('Failed to update job description');
+      }
     } catch (error) {
       console.warn('Update job description failed, using local storage');
-      const jobs = this.storage.get('jobDescriptions') || [];
-      const updatedJobs = jobs.map((job: JobDescription) => 
-        job.id === jobId ? { ...job, ...jobData } : job
-      );
-      this.storage.set('jobDescriptions', updatedJobs);
-      
-      const updatedJob = updatedJobs.find((job: JobDescription) => job.id === jobId);
-      
-      // Add to history
-      this.addJobDescriptionHistory(jobId, 'edited', 'Job description updated');
-      
-      return updatedJob;
     }
+    
+    // Always update local storage
+    const jobs = this.storage.get('jobDescriptions') || [];
+    const updatedJobs = jobs.map((job: JobDescription) => 
+      job.id === jobId ? { ...job, ...jobData } : job
+    );
+    this.storage.set('jobDescriptions', updatedJobs);
+    
+    const updatedJob = updatedJobs.find((job: JobDescription) => job.id === jobId);
+    
+    // Add to history
+    this.addJobDescriptionHistory(jobId, 'edited', 'Job description updated');
+    
+    return updatedJob;
   }
 
   async deleteResume(resumeId: string): Promise<void> {
     try {
-      await this.fetchWithAuth(`/api/resumes/${resumeId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/resumes/${resumeId}`, {
         method: 'DELETE',
       });
+      if (!response.ok) {
+        throw new Error('Failed to delete resume');
+      }
     } catch (error) {
       console.warn('Delete resume failed, using local storage');
-      const resumes = this.storage.get('resumes') || [];
-      const updatedResumes = resumes.filter((resume: Resume) => resume.id !== resumeId);
-      this.storage.set('resumes', updatedResumes);
-      
-      // Add to history
-      this.addResumeHistory(resumeId, 'deleted', 'Resume deleted');
     }
+    
+    // Always update local storage
+    const resumes = this.storage.get('resumes') || [];
+    const updatedResumes = resumes.filter((resume: Resume) => resume.id !== resumeId);
+    this.storage.set('resumes', updatedResumes);
+    
+    // Add to history
+    this.addResumeHistory(resumeId, 'deleted', 'Resume deleted');
   }
 
   async deleteMultipleResumes(resumeIds: string[]): Promise<void> {
     try {
-      await this.fetchWithAuth('/api/resumes/bulk-delete', {
+      const response = await fetch(`${API_BASE_URL}/api/resumes/bulk-delete`, {
         method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({ resumeIds }),
       });
+      if (!response.ok) {
+        throw new Error('Failed to bulk delete resumes');
+      }
     } catch (error) {
       console.warn('Bulk delete resumes failed, using local storage');
-      const resumes = this.storage.get('resumes') || [];
-      const updatedResumes = resumes.filter((resume: Resume) => !resumeIds.includes(resume.id));
-      this.storage.set('resumes', updatedResumes);
-      
-      // Add to history
-      resumeIds.forEach(id => this.addResumeHistory(id, 'deleted', 'Resume bulk deleted'));
     }
+    
+    // Always update local storage
+    const resumes = this.storage.get('resumes') || [];
+    const updatedResumes = resumes.filter((resume: Resume) => !resumeIds.includes(resume.id));
+    this.storage.set('resumes', updatedResumes);
+    
+    // Add to history
+    resumeIds.forEach(id => this.addResumeHistory(id, 'deleted', 'Resume bulk deleted'));
   }
 
   // History management
@@ -366,10 +385,12 @@ class ApiService {
 
   clearResumeHistory(): void {
     this.storage.remove('resumeHistory');
+    this.storage.remove('resumes');
   }
 
   clearJobDescriptionHistory(): void {
     this.storage.remove('jobDescriptionHistory');
+    this.storage.remove('jobDescriptions');
   }
 
   // Skills assessment configuration
@@ -396,67 +417,113 @@ class ApiService {
   async matchResumesWithJobsEnhanced(resumeIds: string[], jobIds: string[], config?: MatchingConfig): Promise<MatchResult[]> {
     const matchingConfig = config || this.getMatchingConfig();
     
-    try {
-      const result = await this.fetchWithAuth('/api/matching/enhanced', {
-        method: 'POST',
-        body: JSON.stringify({ resumeIds, jobIds, config: matchingConfig }),
-      });
+    // Get stored resumes and jobs
+    const resumes = this.storage.get('resumes') || [];
+    const jobs = this.storage.get('jobDescriptions') || [];
+    
+    const results: MatchResult[] = [];
+    
+    for (const resumeId of resumeIds) {
+      const resume = resumes.find((r: Resume) => r.id === resumeId);
+      if (!resume?.extractedData) continue;
       
-      if (result) {
-        return result;
+      for (const jobId of jobIds) {
+        const job = jobs.find((j: JobDescription) => j.id === jobId);
+        if (!job) continue;
+        
+        // Use Gemini for enhanced analysis
+        const geminiAnalysis = await this.analyzeWithGemini(resume.extractedData, job, matchingConfig);
+        
+        const result: MatchResult = {
+          candidateId: resumeId,
+          jobId,
+          candidate: resume.extractedData,
+          job,
+          matchingScore: geminiAnalysis?.score || this.calculateMatchScore(resume, job, matchingConfig),
+          skillMatches: geminiAnalysis?.skillMatches || this.generateSkillMatches(resume, job),
+          strengths: geminiAnalysis?.strengths || this.generateStrengths(resume, job),
+          gaps: geminiAnalysis?.gaps || this.generateGaps(resume, job)
+        };
+        
+        results.push(result);
       }
-      
-      // If API call failed (result is null), fall back to mock data
-      console.warn('Enhanced matching failed, using mock results with configuration');
-      
-      // Get stored resumes and jobs
-      const resumes = this.storage.get('resumes') || [];
-      const jobs = this.storage.get('jobDescriptions') || [];
-      
-      return resumeIds.flatMap(resumeId => {
-        const resume = resumes.find((r: Resume) => r.id === resumeId);
-        return jobIds.map(jobId => {
-          const job = jobs.find((j: JobDescription) => j.id === jobId);
-          const score = this.calculateMatchScore(resume, job, matchingConfig);
-          
-          return {
-            candidateId: resumeId,
-            jobId,
-            candidate: resume?.extractedData || this.getDefaultCandidateData(),
-            job: job || this.getDefaultJobDescription(),
-            matchingScore: score,
-            skillMatches: this.generateSkillMatches(resume, job),
-            strengths: this.generateStrengths(resume, job),
-            gaps: this.generateGaps(resume, job)
-          };
-        });
-      });
-    } catch (error) {
-      console.warn('Enhanced matching failed, using mock results with configuration');
-      
-      // Get stored resumes and jobs
-      const resumes = this.storage.get('resumes') || [];
-      const jobs = this.storage.get('jobDescriptions') || [];
-      
-      return resumeIds.flatMap(resumeId => {
-        const resume = resumes.find((r: Resume) => r.id === resumeId);
-        return jobIds.map(jobId => {
-          const job = jobs.find((j: JobDescription) => j.id === jobId);
-          const score = this.calculateMatchScore(resume, job, matchingConfig);
-          
-          return {
-            candidateId: resumeId,
-            jobId,
-            candidate: resume?.extractedData || this.getDefaultCandidateData(),
-            job: job || this.getDefaultJobDescription(),
-            matchingScore: score,
-            skillMatches: this.generateSkillMatches(resume, job),
-            strengths: this.generateStrengths(resume, job),
-            gaps: this.generateGaps(resume, job)
-          };
-        });
-      });
     }
+    
+    // Save to history
+    const historyItem = {
+      id: `history-${Date.now()}`,
+      date: new Date().toISOString().split('T')[0],
+      time: new Date().toTimeString().split(' ')[0],
+      jobDescriptions: jobs.filter((j: JobDescription) => jobIds.includes(j.id)).map((j: JobDescription) => j.title),
+      resumeCount: resumeIds.length,
+      results,
+      csvFileName: `matching_results_${Date.now()}.csv`
+    };
+    
+    const existingHistory = this.storage.get('matchingHistory') || [];
+    this.storage.set('matchingHistory', [historyItem, ...existingHistory.slice(0, 49)]);
+    
+    return results;
+  }
+
+  private async analyzeWithGemini(candidate: CandidateData, job: JobDescription, config: MatchingConfig): Promise<any> {
+    const prompt = `
+    Analyze this candidate against the job requirements and provide a detailed matching score and analysis.
+
+    CANDIDATE PROFILE:
+    Name: ${candidate.name}
+    Skills: ${candidate.skills.map(s => `${s.name} (${s.level})`).join(', ')}
+    Experience: ${candidate.experience.map(e => `${e.position} at ${e.company} (${e.duration})`).join('; ')}
+    Education: ${candidate.education.map(e => `${e.degree} from ${e.institution} (${e.year})`).join('; ')}
+
+    JOB REQUIREMENTS:
+    Title: ${job.title}
+    Company: ${job.company}
+    Required Skills: ${job.requirements.join(', ')}
+    Preferred Skills: ${job.preferredSkills.join(', ')}
+    Description: ${job.description}
+
+    SCORING CONFIGURATION:
+    - Mandatory Skills Weight: ${config.skillsWeightage.mandatory}%
+    - Optional Skills Weight: ${config.skillsWeightage.optional}%
+    - Experience Weight: ${config.skillsWeightage.experience}%
+    - Education Weight: ${config.skillsWeightage.education}%
+    - Mandatory Skills: ${config.mandatorySkills.join(', ')}
+    - Minimum Experience: ${config.minExperience} years
+
+    Please provide a JSON response with:
+    {
+      "score": <number 0-100>,
+      "skillMatches": [
+        {
+          "skill": "<skill name>",
+          "candidateLevel": "<level>",
+          "required": <boolean>,
+          "match": <boolean>,
+          "score": <number 0-100>
+        }
+      ],
+      "strengths": ["<strength 1>", "<strength 2>", ...],
+      "gaps": ["<gap 1>", "<gap 2>", ...]
+    }
+
+    Consider the weightage configuration and ensure mandatory skills are properly evaluated.
+    `;
+
+    try {
+      const response = await this.callGeminiAPI(prompt);
+      if (response) {
+        // Try to parse JSON from the response
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0]);
+        }
+      }
+    } catch (error) {
+      console.warn('Gemini analysis failed, using fallback:', error);
+    }
+    
+    return null;
   }
 
   private calculateMatchScore(resume: Resume | undefined, job: JobDescription | undefined, config: MatchingConfig): number {
@@ -480,6 +547,7 @@ class ApiService {
   }
 
   private checkMandatorySkills(candidate: CandidateData, mandatorySkills: string[]): boolean {
+    if (mandatorySkills.length === 0) return true;
     const candidateSkills = candidate.skills.map(s => s.name.toLowerCase());
     return mandatorySkills.every(skill => 
       candidateSkills.some(cs => cs.includes(skill.toLowerCase()))
@@ -551,6 +619,11 @@ class ApiService {
       strengths.push('Solid work experience');
     }
     
+    const expertSkills = resume.extractedData.skills.filter(s => s.level === 'expert' || s.level === 'advanced');
+    if (expertSkills.length > 0) {
+      strengths.push(`Expert level skills: ${expertSkills.slice(0, 3).map(s => s.name).join(', ')}`);
+    }
+    
     return strengths;
   }
 
@@ -566,35 +639,15 @@ class ApiService {
     );
     
     if (missingSkills.length > 0) {
-      gaps.push(`Missing skills: ${missingSkills.slice(0, 3).join(', ')}`);
+      gaps.push(`Missing required skills: ${missingSkills.slice(0, 3).join(', ')}`);
+    }
+    
+    const beginnerSkills = resume.extractedData.skills.filter(s => s.level === 'beginner');
+    if (beginnerSkills.length > 0) {
+      gaps.push(`Skills needing improvement: ${beginnerSkills.slice(0, 2).map(s => s.name).join(', ')}`);
     }
     
     return gaps;
-  }
-
-  private getDefaultCandidateData(): CandidateData {
-    return {
-      name: 'Unknown Candidate',
-      email: 'unknown@email.com',
-      phone: 'N/A',
-      address: 'N/A',
-      skills: [],
-      experience: [],
-      education: []
-    };
-  }
-
-  private getDefaultJobDescription(): JobDescription {
-    return {
-      id: 'unknown',
-      title: 'Unknown Position',
-      company: 'Unknown Company',
-      description: 'No description available',
-      requirements: [],
-      preferredSkills: [],
-      uploadDate: new Date().toISOString(),
-      fileName: 'unknown.txt'
-    };
   }
 
   // Get stored data
@@ -604,59 +657,6 @@ class ApiService {
 
   getStoredJobDescriptions(): JobDescription[] {
     return this.storage.get('jobDescriptions') || [];
-  }
-
-  // Mock data for development
-  async getMockCandidateData(): Promise<CandidateData[]> {
-    return [
-      {
-        name: 'John Doe',
-        email: 'john.doe@email.com',
-        phone: '+1-555-0123',
-        address: '123 Main St, New York, NY 10001',
-        linkedin: 'https://linkedin.com/in/johndoe',
-        github: 'https://github.com/johndoe',
-        personalWebsite: 'https://johndoe.dev',
-        skills: [
-          { name: 'JavaScript', level: 'advanced', isProjectUsed: true, weightage: 0.9 },
-          { name: 'React', level: 'expert', isProjectUsed: true, weightage: 0.95 },
-          { name: 'Node.js', level: 'intermediate', isProjectUsed: true, weightage: 0.8 },
-          { name: 'Python', level: 'beginner', isProjectUsed: false, weightage: 0.4 },
-        ],
-        experience: [
-          {
-            company: 'Tech Corp',
-            position: 'Senior Frontend Developer',
-            duration: '2020-2023',
-            description: 'Led frontend development for multiple projects',
-            technologies: ['React', 'TypeScript', 'GraphQL']
-          }
-        ],
-        education: [
-          {
-            degree: 'Bachelor of Computer Science',
-            institution: 'University of Technology',
-            year: '2020',
-            gpa: '3.8'
-          }
-        ]
-      }
-    ];
-  }
-
-  async getMockJobDescriptions(): Promise<JobDescription[]> {
-    return [
-      {
-        id: '1',
-        title: 'Senior Frontend Developer',
-        company: 'TechStart Inc.',
-        description: 'We are looking for a Senior Frontend Developer to join our team...',
-        requirements: ['React', 'TypeScript', 'JavaScript', 'CSS', 'HTML'],
-        preferredSkills: ['GraphQL', 'Node.js', 'Testing'],
-        uploadDate: new Date().toISOString(),
-        fileName: 'frontend-developer.txt'
-      }
-    ];
   }
 }
 
